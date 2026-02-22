@@ -26,22 +26,16 @@ void ble_app_on_sync(void)
     /* Set the generated random address as the device identity address */
     ble_hs_id_set_rnd(addr.val);
 
-    /*
-     * Define 128-bit UUID for iBeacon.
-     * Here it is filled with 0x11 just for testing.
-     * In real applications, use a proper UUID.
-     */
-    uint8_t uuid128[16];
-    memset(uuid128, 0x11, sizeof(uuid128));
+    /* Configure advertising data (Eddystone URL frame) */
+    struct ble_hs_adv_fields fields = (struct ble_hs_adv_fields){0};
 
-    /*
-     * Configure iBeacon advertising payload:
-     * uuid128  → 128-bit Proximity UUID
-     * 2        → Major value
-     * 10       → Minor value
-     * -50      → Measured RSSI at 1 meter (calibration value)
-     */
-    ble_ibeacon_set_adv_data(uuid128, 2, 10, -50);
+    /* Set Eddystone URL frame in advertising data */
+    ble_eddystone_set_adv_data_url(&fields,
+                                   BLE_EDDYSTONE_URL_SCHEME_HTTPS,
+                                   "learnesp32",
+                                   strlen("learnesp32"),
+                                   BLE_EDDYSTONE_URL_SUFFIX_COM,
+                                   -30);
 
     /*
      * Advertising parameters:
