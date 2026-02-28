@@ -6,12 +6,35 @@
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "services/gap/ble_svc_gap.h"
+#include "services/gatt/ble_svc_gatt.h"
 
 #define DEVICE_NAME "MY BLE DEVICE"
+
+#define DEVICE_INFO_SERVICE 0x180A
+#define MANUFACTURER_NAME 0x2A29
 
 uint8_t ble_addr_type;
 
 void ble_app_advertise(void);
+
+/* Callback for when the device receives a read request on the Manufacturer Name characteristic. */
+static int device_info(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    const char *message = "SAURABH KADAM";
+    os_mbuf_append(ctxt->om, message, strlen(message));
+    return 0;
+}
+
+/* GATT service definition. */
+static const struct ble_gatt_svc_def gat_svcs[] = {
+    {.type = BLE_GATT_SVC_TYPE_PRIMARY,
+     .uuid = BLE_UUID16_DECLARE(DEVICE_INFO_SERVICE),
+     .characteristics = (struct ble_gatt_chr_def[]){
+         {.uuid = BLE_UUID16_DECLARE(MANUFACTURER_NAME),
+          .flags = BLE_GATT_CHR_F_READ,
+          .access_cb = device_info},
+         {0}}},
+    {0}};
 
 static int ble_gap_event(struct ble_gap_event *event, void *arg)
 {
@@ -104,6 +127,11 @@ void app_main(void)
     /* Set the device name and initialize GAP service */
     ble_svc_gap_device_name_set(DEVICE_NAME);
     ble_svc_gap_init();
+
+    /* Initialize GATT service and add our custom service */
+    ble_svc_gatt_init();
+    ble_gatts_count_cfg(gat_svcs);
+    ble_gatts_add_svcs(gat_svcs);
 
     /* Register sync callback (called when BLE stack is ready) */
     ble_hs_cfg.sync_cb = ble_app_on_sync;
