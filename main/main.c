@@ -7,6 +7,64 @@
 #include "host/ble_hs.h"
 #include "services/gap/ble_svc_gap.h"
 
+#define DEVICE_NAME "MY BLE DEVICE"
+
+uint8_t ble_addr_type;
+
+void ble_app_advertise(void);
+
+static int ble_gap_event(struct ble_gap_event *event, void *arg)
+{
+    switch (event->type)
+    {
+    case BLE_GAP_EVENT_CONNECT:
+        ESP_LOGI("GAP", "BLE_GAP_EVENT_CONNECT %s", event->connect.status == 0 ? "OK" : "Failed");
+        if (event->connect.status != 0)
+        {
+            ble_app_advertise();
+        }
+        break;
+    case BLE_GAP_EVENT_DISCONNECT:
+        ESP_LOGI("GAP", "BLE_GAP_EVENT_DISCONNECT");
+        ble_app_advertise();
+        break;
+    case BLE_GAP_EVENT_ADV_COMPLETE:
+        ESP_LOGI("GAP", "BLE_GAP_EVENT_ADV_COMPLETE");
+        ble_app_advertise();
+        break;
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        ESP_LOGI("GAP", "BLE_GAP_EVENT_SUBSCRIBE");
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
+void ble_app_advertise(void)
+{
+    struct ble_hs_adv_fields fields;
+    memset(&fields, 0, sizeof(fields));
+
+    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_DISC_LTD;
+    fields.tx_pwr_lvl_is_present = 1;
+    fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
+
+    fields.name = (uint8_t *)ble_svc_gap_device_name();
+    fields.name_len = strlen(ble_svc_gap_device_name());
+    fields.name_is_complete = 1;
+
+    ble_gap_adv_set_fields(&fields);
+
+    struct ble_gap_adv_params adv_params;
+    memset(&adv_params, 0, sizeof(adv_params));
+
+    adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
+    adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+
+    ble_gap_adv_start(ble_addr_type, NULL, BLE_HS_FOREVER, &adv_params, ble_gap_event, NULL);
+}
+
 /*
  * This callback is executed once the BLE Host and Controller
  * are fully synchronized and ready to operate.
@@ -14,45 +72,8 @@
  */
 void ble_app_on_sync(void)
 {
-    ble_addr_t addr;
-
-    /*
-     * Generate a random static BLE address.
-     * 1 → BLE_ADDR_RANDOM (static random address)
-     * This avoids using the public MAC address.
-     */
-    ble_hs_id_gen_rnd(1, &addr);
-
-    /* Set the generated random address as the device identity address */
-    ble_hs_id_set_rnd(addr.val);
-
-    /* Configure advertising data (Eddystone URL frame) */
-    struct ble_hs_adv_fields fields = (struct ble_hs_adv_fields){0};
-
-    /* Set Eddystone URL frame in advertising data */
-    ble_eddystone_set_adv_data_url(&fields,
-                                   BLE_EDDYSTONE_URL_SCHEME_HTTPS,
-                                   "learnesp32",
-                                   strlen("learnesp32"),
-                                   BLE_EDDYSTONE_URL_SUFFIX_COM,
-                                   -30);
-
-    /*
-     * Advertising parameters:
-     * Zero initialization = default settings:
-     * - Undirected advertising
-     * - General discoverable mode
-     * - Connectable (if supported by payload)
-     */
-    struct ble_gap_adv_params adv_params = (struct ble_gap_adv_params){0};
-
-    /*
-     * Start advertising:
-     * BLE_OWN_ADDR_RANDOM → Use random static address
-     * NULL                → No direct advertising target
-     * BLE_HS_FOREVER      → Advertise indefinitely
-     */
-    ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params, NULL, NULL);
+    ble_hs_id_infer_auto(0, &ble_addr_type);
+    ble_app_advertise();
 }
 
 /*
@@ -79,6 +100,10 @@ void app_main(void)
 
     /* Initialize NimBLE host stack */
     nimble_port_init();
+
+    /* Set the device name and initialize GAP service */
+    ble_svc_gap_device_name_set(DEVICE_NAME);
+    ble_svc_gap_init();
 
     /* Register sync callback (called when BLE stack is ready) */
     ble_hs_cfg.sync_cb = ble_app_on_sync;
