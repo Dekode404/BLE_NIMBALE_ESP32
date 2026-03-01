@@ -15,10 +15,40 @@
 
 #define BATTERY_SERVICE 0x180F
 #define BATTERY_LEVEL_CHAR 0x2A19
+#define BATTRY_CLIENT_CONFIG_DESCRIPTOR 0x2902
 
 uint8_t ble_addr_type;
 
+uint16_t batt_char_attr_hdl;
+uint16_t conn_hdl;
+
+/* FreeRTOS timer handle type updated for v8+ compatibility */
+static TimerHandle_t timer_handler;
+
 void ble_app_advertise(void);
+
+static uint8_t config[2] = {0x01, 0x00};
+
+static int battry_level_descriptor(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_DSC)
+    {
+        os_mbuf_append(ctxt->om, &config, sizeof(config));
+    }
+    else
+    {
+        memcpy(config, ctxt->om->om_data, ctxt->om->om_len);
+    }
+    if (config[0] == 0x01)
+    {
+        xTimerStart(timer_handler, 0);
+    }
+    else
+    {
+        xTimerStop(timer_handler, 0);
+    }
+    return 0;
+}
 
 static int battery_read(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -64,11 +94,15 @@ static const struct ble_gatt_chr_def device_info_chrs[] = {
 /* ================= BATTERY SERVICE ================= */
 
 static const struct ble_gatt_chr_def battery_chrs[] = {
-    {
-        .uuid = BLE_UUID16_DECLARE(BATTERY_LEVEL_CHAR),
-        .flags = BLE_GATT_CHR_F_READ,
-        .access_cb = battery_read,
-    },
+    {.uuid = BLE_UUID16_DECLARE(BATTERY_LEVEL_CHAR),
+     .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+     .access_cb = battery_read,
+     .val_handle = &batt_char_attr_hdl,
+     .descriptors = (struct ble_gatt_dsc_def[]){
+         {.uuid = BLE_UUID16_DECLARE(BATTRY_CLIENT_CONFIG_DESCRIPTOR),
+          .att_flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+          .access_cb = battry_level_descriptor},
+         {0}}},
     {0}};
 
 /* ================= GATT SERVICES ================= */
@@ -97,6 +131,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         {
             ble_app_advertise();
         }
+        conn_hdl = event->connect.conn_handle;
         break;
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI("GAP", "BLE_GAP_EVENT_DISCONNECT");
@@ -108,6 +143,10 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         break;
     case BLE_GAP_EVENT_SUBSCRIBE:
         ESP_LOGI("GAP", "BLE_GAP_EVENT_SUBSCRIBE");
+        if (event->subscribe.attr_handle == batt_char_attr_hdl)
+        {
+            xTimerStart(timer_handler, 0);
+        }
         break;
     default:
         break;
@@ -160,6 +199,18 @@ void host_task(void *param)
     nimble_port_run(); // Start NimBLE event loop
 }
 
+uint8_t battry = 100;
+void update_battery_timer()
+{
+    if (battry-- == 0)
+    {
+        battry = 100;
+    }
+    printf("reporting battry level %d\n", battry);
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(&battry, sizeof(battry));
+    ble_gattc_notify_custom(conn_hdl, batt_char_attr_hdl, om);
+}
+
 /*
  * Main application entry point.
  * Initializes NVS, BLE controller, and NimBLE host stack.
@@ -186,6 +237,8 @@ void app_main(void)
 
     /* Register sync callback (called when BLE stack is ready) */
     ble_hs_cfg.sync_cb = ble_app_on_sync;
+
+    timer_handler = xTimerCreate("update_battery_timer", pdMS_TO_TICKS(1000), pdTRUE, NULL, update_battery_timer);
 
     /* Create FreeRTOS task for NimBLE host */
     nimble_port_freertos_init(host_task);
