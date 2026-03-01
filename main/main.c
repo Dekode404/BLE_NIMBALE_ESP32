@@ -13,9 +13,19 @@
 #define DEVICE_INFO_SERVICE 0x180A
 #define MANUFACTURER_NAME 0x2A29
 
+#define BATTERY_SERVICE 0x180F
+#define BATTERY_LEVEL_CHAR 0x2A19
+
 uint8_t ble_addr_type;
 
 void ble_app_advertise(void);
+
+static int battery_read(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    uint8_t battery_level = 85;
+    os_mbuf_append(ctxt->om, &battery_level, sizeof(battery_level));
+    return 0;
+}
 
 static int device_write(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -31,19 +41,51 @@ static int device_info(uint16_t conn_handle, uint16_t attr_handle, struct ble_ga
     return 0;
 }
 
-/* GATT service definition. */
-static const struct ble_gatt_svc_def gat_svcs[] = {
-    {.type = BLE_GATT_SVC_TYPE_PRIMARY,
-     .uuid = BLE_UUID16_DECLARE(DEVICE_INFO_SERVICE),
-     .characteristics = (struct ble_gatt_chr_def[]){
-         {.uuid = BLE_UUID16_DECLARE(MANUFACTURER_NAME),
-          .flags = BLE_GATT_CHR_F_READ,
-          .access_cb = device_info},
-         {.uuid = BLE_UUID128_DECLARE(0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff),
-          .flags = BLE_GATT_CHR_F_WRITE,
-          .access_cb = device_write},
-         {0}}},
+/* ================= DEVICE INFO SERVICE ================= */
+
+static const struct ble_gatt_chr_def device_info_chrs[] = {
+    {
+        .uuid = BLE_UUID16_DECLARE(MANUFACTURER_NAME),
+        .flags = BLE_GATT_CHR_F_READ,
+        .access_cb = device_info,
+    },
+    {
+        .uuid = BLE_UUID128_DECLARE(
+            0x00, 0x11, 0x22, 0x33,
+            0x44, 0x55, 0x66, 0x77,
+            0x88, 0x99, 0xaa, 0xbb,
+            0xcc, 0xdd, 0xee, 0xff),
+        .flags = BLE_GATT_CHR_F_WRITE,
+        .access_cb = device_write,
+    },
+    {0} // End of characteristics
+};
+
+/* ================= BATTERY SERVICE ================= */
+
+static const struct ble_gatt_chr_def battery_chrs[] = {
+    {
+        .uuid = BLE_UUID16_DECLARE(BATTERY_LEVEL_CHAR),
+        .flags = BLE_GATT_CHR_F_READ,
+        .access_cb = battery_read,
+    },
     {0}};
+
+/* ================= GATT SERVICES ================= */
+
+static const struct ble_gatt_svc_def gat_svcs[] = {
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = BLE_UUID16_DECLARE(DEVICE_INFO_SERVICE),
+        .characteristics = device_info_chrs,
+    },
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = BLE_UUID16_DECLARE(BATTERY_SERVICE),
+        .characteristics = battery_chrs,
+    },
+    {0} // End of services
+};
 
 static int ble_gap_event(struct ble_gap_event *event, void *arg)
 {
